@@ -1,0 +1,58 @@
+# Polymarket 尾盘交易策略 - 生产环境配置
+#
+# 使用方法:
+#   docker-compose -f docker-compose.prod.yml up -d
+#
+# ⚠️ 警告：生产环境会执行真实交易！
+
+version: '3.8'
+
+services:
+  polymarket-strategy:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: polymarket-endgame-prod
+    restart: always
+    
+    # 使用生产环境配置文件
+    env_file:
+      - .env.prod
+    
+    environment:
+      - TZ=UTC
+      - DEBUG_MODE=false
+    
+    # 生产环境：移除 --dry-run，执行真实交易
+    command: []
+    
+    # 日志配置
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "10"
+    
+    # 持久化日志和数据
+    volumes:
+      - ./logs:/app/logs:rw
+      - ./data:/app/data:rw
+    
+    # 生产环境资源配置
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+      restart_policy:
+        condition: any
+        delay: 5s
+        max_attempts: 5
+        window: 120s
+
+networks:
+  default:
+    name: polymarket-prod-network
