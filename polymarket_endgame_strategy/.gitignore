@@ -1,0 +1,49 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.eggs/
+*.egg
+dist/
+build/
+.mypy_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+# Environment files (contain secrets!)
+.env
+.env.local
+.env.prod
+!.env.example
+!.env.prod.example
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Logs and data
+logs/*
+!logs/.gitkeep
+data/*
+!data/.gitkeep
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker volumes
+docker-data/
