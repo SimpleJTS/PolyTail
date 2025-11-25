@@ -1,0 +1,60 @@
+# Polymarket 尾盘交易策略配置文件
+# 复制为 config.yaml 并填入您的配置
+
+# API 凭证（推荐使用环境变量代替）
+api:
+  private_key: ""  # 建议使用环境变量 POLYMARKET_PRIVATE_KEY
+  api_key: ""
+  api_secret: ""
+  api_passphrase: ""
+
+# 交易参数
+trading:
+  # 进场价格阈值（0.95 = 95 cents）
+  entry_price: 0.95
+  
+  # 出场限价（0.99 = 99 cents）
+  exit_price: 0.99
+  
+  # 时间窗口（分钟）
+  min_time_to_end: 5
+  max_time_to_end: 15
+  
+  # 仓位限制（USDC）
+  max_position_size: 100
+  max_total_exposure: 500
+
+# 风险管理
+risk:
+  # 最大同时持仓数
+  max_positions: 10
+  
+  # 单笔最大亏损比例
+  max_loss_per_trade: 0.05
+  
+  # 日最大亏损比例
+  max_daily_loss: 0.10
+
+# 扫描设置
+scan:
+  # 扫描间隔（秒）
+  interval: 10
+  
+  # 每次获取的市场数量
+  market_limit: 500
+
+# 网络设置
+network:
+  # Polygon RPC
+  polygon_rpc_url: "https://polygon-rpc.com"
+  
+  # 是否使用测试网
+  use_testnet: false
+
+# 日志设置
+logging:
+  # 日志级别: DEBUG, INFO, WARNING, ERROR
+  level: "INFO"
+  
+  # 日志文件（留空则不写入文件）
+  file: ""
