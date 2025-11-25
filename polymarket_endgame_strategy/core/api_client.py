@@ -1,6 +1,6 @@
 """
 Polymarket API 客户端
-封装 CLOB API 和 Gamma API 的调用
+基于官方文档: https://docs.polymarket.com
 """
 
 import asyncio
@@ -13,18 +13,11 @@ from models.market import Market, MarketOutcome, OrderSide, OrderResult
 from utils.logger import get_logger
 from utils.helpers import safe_float
 
-# 尝试导入 eth_account
-try:
-    from eth_account import Account
-    HAS_ETH_ACCOUNT = True
-except ImportError:
-    HAS_ETH_ACCOUNT = False
-    Account = None
-
 # 尝试导入 py-clob-client
 try:
     from py_clob_client.client import ClobClient
-    from py_clob_client.clob_types import ApiCreds, OrderArgs, OrderType
+    from py_clob_client.clob_types import OrderArgs, OrderType, BalanceAllowanceParams, AssetType
+    from py_clob_client.constants import POLYGON
     HAS_CLOB_CLIENT = True
 except ImportError:
     HAS_CLOB_CLIENT = False
@@ -34,7 +27,7 @@ except ImportError:
 class PolymarketClient:
     """
     Polymarket API 客户端
-    整合 CLOB API（交易）和 Gamma API（市场数据）
+    基于官方 py-clob-client 库
     """
     
     def __init__(self, settings: Optional[Settings] = None):
@@ -47,19 +40,11 @@ class PolymarketClient:
         self.settings = settings or get_settings()
         self.logger = get_logger()
         
-        # HTTP 客户端
+        # HTTP 客户端（用于市场数据）
         self._http_client: Optional[httpx.AsyncClient] = None
         
         # CLOB 客户端（用于交易）
         self._clob_client: Optional[Any] = None
-        
-        # 账户信息
-        self._account = None
-        if self.settings.polymarket_private_key and HAS_ETH_ACCOUNT and Account:
-            try:
-                self._account = Account.from_key(self.settings.polymarket_private_key)
-            except Exception as e:
-                self.logger.warning(f"无法加载私钥: {e}")
     
     async def __aenter__(self):
         """异步上下文管理器入口"""
@@ -78,19 +63,17 @@ class PolymarketClient:
             headers={"Content-Type": "application/json"}
         )
         
-        # 初始化 CLOB 客户端（如果可用）
-        if HAS_CLOB_CLIENT and self.settings.validate_credentials():
+        # 初始化 CLOB 客户端（只需要私钥）
+        if HAS_CLOB_CLIENT and self.settings.polymarket_private_key:
             try:
+                host = "https://clob.polymarket.com"
                 self._clob_client = ClobClient(
-                    host=self.settings.active_clob_url,
+                    host=host,
                     key=self.settings.polymarket_private_key,
-                    chain_id=137,  # Polygon mainnet
-                    creds=ApiCreds(
-                        api_key=self.settings.polymarket_api_key,
-                        api_secret=self.settings.polymarket_api_secret,
-                        api_passphrase=self.settings.polymarket_api_passphrase,
-                    )
+                    chain_id=POLYGON,
                 )
+                # 根据官方文档，需要设置 API creds（从私钥派生）
+                self._clob_client.set_api_creds(self._clob_client.create_or_derive_api_creds())
                 self.logger.info("CLOB 客户端已连接")
             except Exception as e:
                 self.logger.warning(f"CLOB 客户端初始化失败: {e}")
@@ -259,14 +242,14 @@ class PolymarketClient:
         order_type: str = "GTC"
     ) -> OrderResult:
         """
-        下单
+        下单 - 基于官方文档
         
         Args:
             token_id: Token ID
-            side: 买/卖方向
-            price: 价格
+            side: 买/卖方向 (BUY/SELL)
+            price: 价格 (0-1)
             size: 数量
-            order_type: 订单类型
+            order_type: 订单类型 (GTC/FOK/GTD)
         
         Returns:
             订单结果
@@ -274,17 +257,17 @@ class PolymarketClient:
         if not self._clob_client:
             return OrderResult(
                 success=False,
-                message="CLOB 客户端未初始化，请检查 API 凭证配置"
+                message="CLOB 客户端未初始化，请检查私钥配置"
             )
         
         try:
-            # 构建订单参数
+            # 根据官方文档构建订单
+            # BUY = 买入, SELL = 卖出
             order_args = OrderArgs(
-                token_id=token_id,
                 price=price,
                 size=size,
-                side=side.value,
-                fee_rate_bps=0,  # Polymarket 目前不收取手续费
+                side=side.value,  # "BUY" or "SELL"
+                token_id=token_id,
             )
             
             # 创建并签名订单
@@ -293,9 +276,13 @@ class PolymarketClient:
             # 提交订单
             response = self._clob_client.post_order(signed_order, order_type)
             
+            order_id = ""
+            if isinstance(response, dict):
+                order_id = response.get("orderID", "") or response.get("id", "")
+            
             return OrderResult(
                 success=True,
-                order_id=response.get("orderID", ""),
+                order_id=order_id,
                 message="订单已提交"
             )
             

@@ -44,10 +44,7 @@ def parse_args():
     python main.py --exit 0.98         # 设置出场价格为 98 cents
 
 环境变量:
-    POLYMARKET_PRIVATE_KEY    私钥
-    POLYMARKET_API_KEY        API Key
-    POLYMARKET_API_SECRET     API Secret
-    POLYMARKET_API_PASSPHRASE API Passphrase
+    POLYMARKET_PRIVATE_KEY    钱包私钥（必填，0x开头）
         """
     )
     

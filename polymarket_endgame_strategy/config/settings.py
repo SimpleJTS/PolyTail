@@ -1,6 +1,6 @@
 """
 配置管理模块
-管理所有交易参数和API凭证
+管理所有交易参数
 """
 
 from functools import lru_cache
@@ -13,23 +13,11 @@ class Settings(BaseSettings):
     """策略配置参数"""
     
     # ============================================
-    # Polymarket API 凭证
+    # Polymarket 凭证（只需要私钥）
     # ============================================
     polymarket_private_key: str = Field(
         default="",
-        description="Polymarket 私钥（用于签名交易）"
-    )
-    polymarket_api_key: str = Field(
-        default="",
-        description="Polymarket API Key"
-    )
-    polymarket_api_secret: str = Field(
-        default="",
-        description="Polymarket API Secret"
-    )
-    polymarket_api_passphrase: str = Field(
-        default="",
-        description="Polymarket API Passphrase"
+        description="Polygon 钱包私钥（用于签名交易）"
     )
     
     # ============================================
@@ -132,13 +120,8 @@ class Settings(BaseSettings):
         return int(self.exit_price * 100)
     
     def validate_credentials(self) -> bool:
-        """验证API凭证是否已配置"""
-        return bool(
-            self.polymarket_private_key and
-            self.polymarket_api_key and
-            self.polymarket_api_secret and
-            self.polymarket_api_passphrase
-        )
+        """验证私钥是否已配置"""
+        return bool(self.polymarket_private_key)
 
 
 @lru_cache()
