@@ -1,18 +1,20 @@
 """
 尾盘交易策略
 整合扫描、监控和执行模块
+支持普通市场和 Updown 周期性市场
 """
 
 import asyncio
 from datetime import datetime
-from typing import Optional
+from typing import Optional, List
 
 from config.settings import Settings, get_settings
-from models.market import TradeSignal
+from models.market import TradeSignal, Market, MarketOutcome, OrderSide
 from core.api_client import PolymarketClient
 from core.market_scanner import MarketScanner
 from core.price_monitor import PriceMonitor
 from core.order_executor import OrderExecutor, TradeRecord
+from core.updown_scanner import UpdownScanner, UpdownMarket
 from utils.logger import get_logger, TradeLogger
 
 
@@ -41,12 +43,17 @@ class EndgameStrategy:
         # 初始化组件
         self.client: Optional[PolymarketClient] = None
         self.scanner: Optional[MarketScanner] = None
+        self.updown_scanner: Optional[UpdownScanner] = None  # Updown 市场扫描器
         self.monitor: Optional[PriceMonitor] = None
         self.executor: Optional[OrderExecutor] = None
         
         # 运行状态
         self._running = False
         self._start_time: Optional[datetime] = None
+        
+        # Updown 扫描统计
+        self._updown_scanned = 0
+        self._updown_signals = 0
     
     async def initialize(self):
         """初始化策略组件"""
@@ -77,6 +84,9 @@ class EndgameStrategy:
         # 初始化扫描器
         self.scanner = MarketScanner(self.client, self.settings)
         
+        # 初始化 Updown 扫描器
+        self.updown_scanner = UpdownScanner(self.settings)
+        
         # 初始化价格监控器
         self.monitor = PriceMonitor(self.client, self.settings)
         
@@ -88,6 +98,87 @@ class EndgameStrategy:
         self.monitor.add_signal_callback(self._on_monitor_signal)
         
         self.logger.info("✅ 策略组件初始化完成")
+    
+    async def _scan_updown_markets(self):
+        """扫描 Updown 周期性市场"""
+        try:
+            markets = await self.updown_scanner.scan(
+                min_minutes=self.settings.min_time_to_end,
+                max_minutes=self.settings.max_time_to_end
+            )
+            
+            self._updown_scanned += len(markets)
+            
+            for market in markets:
+                # 检查 Up 选项
+                if market.up_price >= self.settings.entry_price:
+                    self._updown_signals += 1
+                    self.logger.info(
+                        f"🎯 Updown 信号: {market.title}\n"
+                        f"   Up: {market.up_price:.2%} | Down: {market.down_price:.2%}\n"
+                        f"   剩余: {market.minutes_to_end:.1f} 分钟"
+                    )
+                    
+                    # 创建交易信号
+                    signal = self._create_signal_from_updown(market, "Up")
+                    if signal:
+                        await self._execute_trade(signal)
+                
+                # 检查 Down 选项
+                elif market.down_price >= self.settings.entry_price:
+                    self._updown_signals += 1
+                    self.logger.info(
+                        f"🎯 Updown 信号: {market.title}\n"
+                        f"   Up: {market.up_price:.2%} | Down: {market.down_price:.2%}\n"
+                        f"   剩余: {market.minutes_to_end:.1f} 分钟"
+                    )
+                    
+                    signal = self._create_signal_from_updown(market, "Down")
+                    if signal:
+                        await self._execute_trade(signal)
+                else:
+                    # 没有达到进场价格，只记录
+                    self.logger.debug(
+                        f"📊 Updown: {market.title[:40]}... | "
+                        f"Up: {market.up_price:.0%} Down: {market.down_price:.0%} | "
+                        f"{market.minutes_to_end:.1f}min"
+                    )
+                        
+        except Exception as e:
+            self.logger.error(f"Updown 扫描错误: {e}")
+    
+    def _create_signal_from_updown(self, market: UpdownMarket, outcome: str) -> Optional[TradeSignal]:
+        """从 Updown 市场创建交易信号"""
+        try:
+            token_id = market.up_token_id if outcome == "Up" else market.down_token_id
+            price = market.up_price if outcome == "Up" else market.down_price
+            
+            if not token_id:
+                return None
+            
+            # 创建 Market 对象
+            market_obj = Market(
+                condition_id=market.slug,
+                question=market.title,
+                end_date=market.end_date,
+                active=market.active,
+                tokens=[
+                    MarketOutcome(token_id=market.up_token_id or "", outcome="Up", price=market.up_price),
+                    MarketOutcome(token_id=market.down_token_id or "", outcome="Down", price=market.down_price),
+                ]
+            )
+            
+            return TradeSignal(
+                market=market_obj,
+                token_id=token_id,
+                outcome=outcome,
+                side=OrderSide.BUY,
+                entry_price=price,
+                exit_price=self.settings.exit_price
+            )
+        except Exception as e:
+            self.logger.error(f"创建信号失败: {e}")
+            return None
     
     async def _on_scanner_signal(self, signal: TradeSignal):
         """
@@ -159,17 +250,21 @@ class EndgameStrategy:
             # 启动价格监控
             await self.monitor.start()
             
-            # 主循环 - 定期检查持仓和打印统计
+            # 主循环 - 定期扫描 Updown 市场
             while self._running:
                 try:
+                    # 扫描 Updown 市场
+                    await self._scan_updown_markets()
+                    
                     # 检查持仓
                     if self.executor.get_all_positions():
                         await self.executor.check_positions()
                     
-                    # 打印统计（每分钟）
+                    # 打印统计
                     await self._print_stats()
                     
-                    await asyncio.sleep(60)
+                    # 等待扫描间隔
+                    await asyncio.sleep(self.settings.scan_interval)
                     
                 except asyncio.CancelledError:
                     break
@@ -225,8 +320,9 @@ class EndgameStrategy:
         
         self.logger.info(
             f"\n📊 运行统计 | 运行时间: {runtime_str}\n"
-            f"   扫描器: 已处理 {scanner_stats.get('processed_markets', 0)} 个市场\n"
-            f"   监控器: 监控 {monitor_stats.get('monitored_count', 0)} 个市场, "
+            f"   Updown: 扫描 {self._updown_scanned} 次, 信号 {self._updown_signals} 个\n"
+            f"   普通市场: 已处理 {scanner_stats.get('processed_markets', 0)} 个\n"
+            f"   监控器: 监控 {monitor_stats.get('monitored_count', 0)} 个, "
             f"触发 {monitor_stats.get('triggered_count', 0)} 次\n"
             f"   交易: {stats['total_trades']} 笔, "
             f"持仓 {stats['open_positions']} 个\n"
