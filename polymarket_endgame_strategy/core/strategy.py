@@ -13,6 +13,7 @@ from models.market import TradeSignal, Market, MarketOutcome, OrderSide
 from core.api_client import PolymarketClient
 from core.order_executor import OrderExecutor, TradeRecord
 from core.updown_scanner import UpdownScanner, UpdownMarket
+from core.sports_scanner import SportsScanner, SportsMarket
 from utils.logger import get_logger, TradeLogger
 
 
@@ -41,15 +42,18 @@ class EndgameStrategy:
         # 初始化组件
         self.client: Optional[PolymarketClient] = None
         self.updown_scanner: Optional[UpdownScanner] = None  # Updown 市场扫描器
+        self.sports_scanner: Optional[SportsScanner] = None  # 体育市场扫描器
         self.executor: Optional[OrderExecutor] = None
         
         # 运行状态
         self._running = False
         self._start_time: Optional[datetime] = None
         
-        # Updown 扫描统计
+        # 扫描统计
         self._updown_scanned = 0
         self._updown_signals = 0
+        self._sports_scanned = 0
+        self._sports_signals = 0
     
     async def initialize(self):
         """初始化策略组件"""
@@ -88,6 +92,9 @@ class EndgameStrategy:
         
         # 初始化 Updown 扫描器（专门扫描 5m/15m 周期性市场）
         self.updown_scanner = UpdownScanner(self.settings)
+        
+        # 初始化体育扫描器
+        self.sports_scanner = SportsScanner(self.settings)
         
         # 初始化订单执行器
         self.executor = OrderExecutor(self.client, self.settings)
@@ -141,6 +148,73 @@ class EndgameStrategy:
                         
         except Exception as e:
             self.logger.error(f"Updown 扫描错误: {e}")
+    
+    async def _scan_sports_markets(self):
+        """扫描体育市场尾盘"""
+        try:
+            # 扫描 5-60 分钟内结束的体育市场
+            markets = await self.sports_scanner.scan(
+                min_minutes=self.settings.min_time_to_end,
+                max_minutes=60,  # 体育市场时间窗口放宽到60分钟
+                min_price=self.settings.entry_price
+            )
+            
+            self._sports_scanned += len(markets)
+            
+            for market in markets:
+                best_outcome, best_price = market.best_outcome
+                
+                if best_price >= self.settings.entry_price:
+                    self._sports_signals += 1
+                    self.logger.info(
+                        f"🏀 体育信号: {market.question[:50]}...\n"
+                        f"   {best_outcome}: {best_price:.2%}\n"
+                        f"   剩余: {market.minutes_to_end:.1f} 分钟"
+                    )
+                    
+                    # 创建交易信号
+                    signal = self._create_signal_from_sports(market, best_outcome)
+                    if signal:
+                        await self._execute_trade(signal)
+                        
+        except Exception as e:
+            self.logger.error(f"体育扫描错误: {e}")
+    
+    def _create_signal_from_sports(self, market: SportsMarket, outcome: str) -> Optional[TradeSignal]:
+        """从体育市场创建交易信号"""
+        try:
+            token_id = market.get_outcome_token(outcome)
+            price = market.get_outcome_price(outcome)
+            
+            if not token_id:
+                return None
+            
+            # 创建 Market 对象
+            tokens = []
+            for i, out in enumerate(market.outcomes):
+                tid = market.token_ids[i] if i < len(market.token_ids) else ""
+                p = market.prices[i] if i < len(market.prices) else 0.0
+                tokens.append(MarketOutcome(token_id=tid, outcome=out, price=p))
+            
+            market_obj = Market(
+                condition_id=market.condition_id,
+                question=market.question,
+                end_date=market.end_date,
+                active=market.active,
+                tokens=tokens
+            )
+            
+            return TradeSignal(
+                market=market_obj,
+                token_id=token_id,
+                outcome=outcome,
+                side=OrderSide.BUY,
+                entry_price=price,
+                exit_price=self.settings.exit_price
+            )
+        except Exception as e:
+            self.logger.error(f"创建体育信号失败: {e}")
+            return None
     
     def _create_signal_from_updown(self, market: UpdownMarket, outcome: str) -> Optional[TradeSignal]:
         """从 Updown 市场创建交易信号"""
@@ -209,11 +283,14 @@ class EndgameStrategy:
             self.logger.info("🚀 策略开始运行...")
             self.logger.info("按 Ctrl+C 停止策略")
             
-            # 主循环 - 定期扫描 Updown 市场
+            # 主循环 - 定期扫描市场
             while self._running:
                 try:
-                    # 扫描 Updown 市场
+                    # 扫描 Updown 市场（5-15分钟周期）
                     await self._scan_updown_markets()
+                    
+                    # 扫描体育市场尾盘
+                    await self._scan_sports_markets()
                     
                     # 检查持仓
                     if self.executor.get_all_positions():
@@ -271,8 +348,8 @@ class EndgameStrategy:
         self.logger.info(
             f"\n📊 运行统计 | 运行时间: {runtime_str}\n"
             f"   Updown: 扫描 {self._updown_scanned} 次, 信号 {self._updown_signals} 个\n"
-            f"   交易: {stats['total_trades']} 笔, "
-            f"持仓 {stats['open_positions']} 个\n"
+            f"   体育: 扫描 {self._sports_scanned} 次, 信号 {self._sports_signals} 个\n"
+            f"   交易: {stats['total_trades']} 笔, 持仓 {stats['open_positions']} 个\n"
             f"   盈亏: 已实现 {stats['total_realized_pnl']:+.2f} USDC, "
             f"未实现 {stats['unrealized_pnl']:+.2f} USDC\n"
             f"   敞口: {stats['total_exposure']:.2f} / {self.settings.max_total_exposure} USDC"
