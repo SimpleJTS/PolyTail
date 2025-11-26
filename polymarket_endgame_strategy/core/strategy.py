@@ -14,6 +14,7 @@ from core.api_client import PolymarketClient
 from core.order_executor import OrderExecutor, TradeRecord
 from core.updown_scanner import UpdownScanner, UpdownMarket
 from core.sports_scanner import SportsScanner, SportsMarket
+from core.realtime_monitor import RealtimeMonitor, FastScanner
 from utils.logger import get_logger, TradeLogger
 
 
@@ -43,6 +44,7 @@ class EndgameStrategy:
         self.client: Optional[PolymarketClient] = None
         self.updown_scanner: Optional[UpdownScanner] = None  # Updown 市场扫描器
         self.sports_scanner: Optional[SportsScanner] = None  # 体育市场扫描器
+        self.realtime_monitor: Optional[RealtimeMonitor] = None  # 实时价格监听
         self.executor: Optional[OrderExecutor] = None
         
         # 运行状态
@@ -54,6 +56,7 @@ class EndgameStrategy:
         self._updown_signals = 0
         self._sports_scanned = 0
         self._sports_signals = 0
+        self._realtime_updates = 0
     
     async def initialize(self):
         """初始化策略组件"""
@@ -95,6 +98,10 @@ class EndgameStrategy:
         
         # 初始化体育扫描器
         self.sports_scanner = SportsScanner(self.settings)
+        
+        # 初始化实时价格监听器
+        self.realtime_monitor = RealtimeMonitor(self.settings)
+        self.realtime_monitor.add_price_callback(self._on_realtime_price)
         
         # 初始化订单执行器
         self.executor = OrderExecutor(self.client, self.settings)
@@ -146,8 +153,42 @@ class EndgameStrategy:
                         f"{market.minutes_to_end:.1f}min"
                     )
                         
+            # 将市场添加到实时监听
+            for market in markets:
+                if market.up_token_id:
+                    self.realtime_monitor.add_token(market.up_token_id, {
+                        "market": market,
+                        "outcome": "Up"
+                    })
+                if market.down_token_id:
+                    self.realtime_monitor.add_token(market.down_token_id, {
+                        "market": market,
+                        "outcome": "Down"
+                    })
+                        
         except Exception as e:
             self.logger.error(f"Updown 扫描错误: {e}")
+    
+    async def _on_realtime_price(self, token_id: str, price: float):
+        """实时价格回调"""
+        self._realtime_updates += 1
+        
+        # 检查是否达到进场条件
+        if price >= self.settings.entry_price:
+            market_info = self.realtime_monitor._subscribed_tokens.get(token_id, {})
+            market = market_info.get("market")
+            outcome = market_info.get("outcome", "")
+            
+            if market:
+                self.logger.info(
+                    f"⚡ 实时信号! {market.title[:40]}...\n"
+                    f"   {outcome}: {price:.2%}"
+                )
+                
+                signal = self._create_signal_from_updown(market, outcome)
+                if signal:
+                    signal.entry_price = price  # 使用实时价格
+                    await self._execute_trade(signal)
     
     async def _scan_sports_markets(self):
         """扫描体育市场尾盘"""
@@ -281,26 +322,34 @@ class EndgameStrategy:
             self._start_time = datetime.utcnow()
             
             self.logger.info("🚀 策略开始运行...")
+            self.logger.info("⚡ 使用 WebSocket 实时监听 + 快速轮询（2秒）")
             self.logger.info("按 Ctrl+C 停止策略")
             
-            # 主循环 - 定期扫描市场
+            # 启动实时监听
+            await self.realtime_monitor.start()
+            
+            # 主循环 - 快速扫描市场（2秒间隔）
+            scan_count = 0
             while self._running:
                 try:
                     # 扫描 Updown 市场（5-15分钟周期）
                     await self._scan_updown_markets()
                     
-                    # 扫描体育市场尾盘
-                    await self._scan_sports_markets()
+                    # 每30秒扫描一次体育市场（较慢）
+                    scan_count += 1
+                    if scan_count % 15 == 0:  # 2秒 * 15 = 30秒
+                        await self._scan_sports_markets()
                     
                     # 检查持仓
                     if self.executor.get_all_positions():
                         await self.executor.check_positions()
                     
-                    # 打印统计
-                    await self._print_stats()
+                    # 每30秒打印一次统计
+                    if scan_count % 15 == 0:
+                        await self._print_stats()
                     
-                    # 等待扫描间隔
-                    await asyncio.sleep(self.settings.scan_interval)
+                    # 快速轮询间隔：2秒
+                    await asyncio.sleep(2)
                     
                 except asyncio.CancelledError:
                     break
@@ -319,6 +368,10 @@ class EndgameStrategy:
         """停止策略"""
         self.logger.info("正在停止策略...")
         self._running = False
+        
+        # 停止实时监听
+        if self.realtime_monitor:
+            await self.realtime_monitor.stop()
         
         # 打印最终统计
         if self.executor:
@@ -349,6 +402,7 @@ class EndgameStrategy:
             f"\n📊 运行统计 | 运行时间: {runtime_str}\n"
             f"   Updown: 扫描 {self._updown_scanned} 次, 信号 {self._updown_signals} 个\n"
             f"   体育: 扫描 {self._sports_scanned} 次, 信号 {self._sports_signals} 个\n"
+            f"   实时更新: {self._realtime_updates} 次\n"
             f"   交易: {stats['total_trades']} 笔, 持仓 {stats['open_positions']} 个\n"
             f"   盈亏: 已实现 {stats['total_realized_pnl']:+.2f} USDC, "
             f"未实现 {stats['unrealized_pnl']:+.2f} USDC\n"
