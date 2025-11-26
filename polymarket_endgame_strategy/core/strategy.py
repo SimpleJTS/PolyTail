@@ -60,8 +60,17 @@ class EndgameStrategy:
         # 验证配置
         if not self.settings.validate_credentials():
             self.logger.warning(
-                "⚠️ API 凭证未配置完整，将以只读模式运行（无法执行交易）"
+                "⚠️ 私钥未配置，将以只读模式运行（无法执行交易）"
             )
+        else:
+            self.logger.info("✅ 私钥已配置，可以执行交易")
+        
+        # 检查 py-clob-client 是否安装
+        try:
+            from py_clob_client.client import ClobClient
+            self.logger.info("✅ py-clob-client 已安装")
+        except ImportError:
+            self.logger.error("❌ py-clob-client 未安装，无法下单！请运行: pip install py-clob-client")
         
         # 显示配置
         self.logger.info(f"📊 策略参数:")
