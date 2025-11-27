@@ -18,10 +18,12 @@ try:
     from py_clob_client.client import ClobClient
     from py_clob_client.clob_types import OrderArgs, OrderType, BalanceAllowanceParams, AssetType
     from py_clob_client.constants import POLYGON
+    from py_clob_client.exceptions import PolyApiException
     HAS_CLOB_CLIENT = True
 except ImportError:
     HAS_CLOB_CLIENT = False
     ClobClient = None
+    PolyApiException = None
 
 
 class PolymarketClient:
@@ -287,10 +289,36 @@ class PolymarketClient:
             )
             
         except Exception as e:
-            self.logger.error(f"下单失败: {e}")
+            import traceback
+            
+            # 输出完整的错误信息
+            error_type = type(e).__name__
+            error_msg = str(e)
+            
+            # 处理 PolyApiException
+            if PolyApiException and isinstance(e, PolyApiException):
+                # PolyApiException 格式: PolyApiException[status_code=X, error_message=Y]
+                error_msg = str(e)
+                
+            # 尝试获取 response 对象的详细信息
+            if hasattr(e, 'response') and e.response is not None:
+                try:
+                    resp = e.response
+                    status = getattr(resp, 'status_code', 'N/A')
+                    body = getattr(resp, 'text', '') or ''
+                    error_msg = f"{error_type} [HTTP {status}]: {body}"
+                except:
+                    pass
+            
+            # 输出详细错误日志
+            self.logger.error(f"🚫 下单失败: {error_msg}")
+            self.logger.error(f"   Token: {token_id[:20]}...")
+            self.logger.error(f"   Side: {side.value}, Price: {price}, Size: {size}")
+            self.logger.debug(f"堆栈:\n{traceback.format_exc()}")
+            
             return OrderResult(
                 success=False,
-                message=f"下单失败: {str(e)}"
+                message=f"{error_msg}"
             )
     
     async def place_market_buy(

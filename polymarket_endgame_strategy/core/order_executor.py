@@ -120,6 +120,8 @@ class OrderExecutor:
                 
                 if not entry_result.success:
                     record.status = "cancelled"
+                    # 输出完整错误信息
+                    self.logger.error(f"❌ 买入失败: {entry_result.message}")
                     self.trade_logger.log_error(
                         "买入失败",
                         Exception(entry_result.message)
