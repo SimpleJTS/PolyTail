@@ -64,7 +64,14 @@ def parse_args():
         "--entry",
         type=float,
         default=None,
-        help="进场价格阈值 (0-1)，例如 0.95 表示 95 cents"
+        help="最低进场价格 (0-1)，例如 0.94 表示 94 cents"
+    )
+    
+    parser.add_argument(
+        "--max-entry",
+        type=float,
+        default=None,
+        help="最高进场价格 (0-1)，超过此价格不下单。例如 0.96 表示 96 cents"
     )
     
     parser.add_argument(
@@ -140,6 +147,9 @@ def create_settings(args) -> Settings:
     # 覆盖命令行参数
     if args.entry is not None:
         settings.entry_price = args.entry
+    
+    if args.max_entry is not None:
+        settings.max_entry_price = args.max_entry
     
     if args.exit is not None:
         settings.exit_price = args.exit

@@ -89,7 +89,8 @@ python3 main.py --scan-once  # 只扫描一次
 
 | 参数 | 环境变量 | 默认值 | 说明 |
 |------|----------|--------|------|
-| `--entry` | `ENTRY_PRICE` | 0.95 | 进场价格阈值 |
+| `--entry` | `ENTRY_PRICE` | 0.95 | 最低进场价格 |
+| `--max-entry` | `MAX_ENTRY_PRICE` | 0.96 | 最高进场价格（超过不下单）|
 | `--exit` | `EXIT_PRICE` | 0.99 | 出场限价 |
 | `--min-time` | `MIN_TIME_TO_END` | 5 | 最小剩余时间（分钟）|
 | `--max-time` | `MAX_TIME_TO_END` | 15 | 最大剩余时间（分钟）|
@@ -97,6 +98,8 @@ python3 main.py --scan-once  # 只扫描一次
 | `--max-exposure` | `MAX_TOTAL_EXPOSURE` | 500 | 最大总敞口（USDC）|
 | `--interval` | `SCAN_INTERVAL` | 10 | 扫描间隔（秒）|
 | `--log-dir` | `LOG_DIR` | `./logs` | 日志目录（4小时轮转）|
+
+> 💡 **价格区间说明**：只有当价格在 `ENTRY_PRICE` ~ `MAX_ENTRY_PRICE` 之间时才会下单。例如设置 94-96 cents，则价格超过 96 cents 时不会下单（利润空间太小）。
 
 ## 日志文件
 

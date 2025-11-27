@@ -29,6 +29,12 @@ class Settings(BaseSettings):
         le=1.0,
         description="进场价格阈值（0.95 = 95 cents）"
     )
+    max_entry_price: float = Field(
+        default=0.96,
+        ge=0.0,
+        le=1.0,
+        description="最高进场价格（超过此价格不下单，利润空间太小）"
+    )
     exit_price: float = Field(
         default=0.99,
         ge=0.0,

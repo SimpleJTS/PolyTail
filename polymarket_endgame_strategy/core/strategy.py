@@ -81,7 +81,7 @@ class EndgameStrategy:
         
         # 显示配置
         self.logger.info(f"📊 策略参数:")
-        self.logger.info(f"   进场价格: {self.settings.entry_price * 100:.0f} cents")
+        self.logger.info(f"   进场价格: {self.settings.entry_price * 100:.0f}-{self.settings.max_entry_price * 100:.0f} cents")
         self.logger.info(f"   出场价格: {self.settings.exit_price * 100:.0f} cents")
         self.logger.info(f"   时间窗口: {self.settings.min_time_to_end}-{self.settings.max_time_to_end} 分钟")
         self.logger.info(f"   最大单笔: {self.settings.max_position_size} USDC")
@@ -119,8 +119,8 @@ class EndgameStrategy:
             self._updown_scanned += len(markets)
             
             for market in markets:
-                # 检查 Up 选项
-                if market.up_price >= self.settings.entry_price:
+                # 检查 Up 选项：价格在 entry_price ~ max_entry_price 之间
+                if self.settings.entry_price <= market.up_price <= self.settings.max_entry_price:
                     self._updown_signals += 1
                     self.logger.info(
                         f"🎯 Updown 信号: {market.title}\n"
@@ -133,8 +133,8 @@ class EndgameStrategy:
                     if signal:
                         await self._execute_trade(signal)
                 
-                # 检查 Down 选项
-                elif market.down_price >= self.settings.entry_price:
+                # 检查 Down 选项：价格在 entry_price ~ max_entry_price 之间
+                elif self.settings.entry_price <= market.down_price <= self.settings.max_entry_price:
                     self._updown_signals += 1
                     self.logger.info(
                         f"🎯 Updown 信号: {market.title}\n"
@@ -145,6 +145,14 @@ class EndgameStrategy:
                     signal = self._create_signal_from_updown(market, "Down")
                     if signal:
                         await self._execute_trade(signal)
+                
+                # 价格超过上限，不交易（利润空间太小）
+                elif market.up_price > self.settings.max_entry_price or market.down_price > self.settings.max_entry_price:
+                    self.logger.debug(
+                        f"⏭️ 跳过 {market.title[:30]}... | "
+                        f"Up: {market.up_price:.0%} Down: {market.down_price:.0%} | "
+                        f"价格超过 {self.settings.max_entry_price:.0%}，利润空间不足"
+                    )
                 else:
                     # 没有达到进场价格，只记录
                     self.logger.debug(
@@ -173,8 +181,8 @@ class EndgameStrategy:
         """实时价格回调"""
         self._realtime_updates += 1
         
-        # 检查是否达到进场条件
-        if price >= self.settings.entry_price:
+        # 检查是否在有效价格区间：entry_price ~ max_entry_price
+        if self.settings.entry_price <= price <= self.settings.max_entry_price:
             market_info = self.realtime_monitor._subscribed_tokens.get(token_id, {})
             market = market_info.get("market")
             outcome = market_info.get("outcome", "")
@@ -189,6 +197,10 @@ class EndgameStrategy:
                 if signal:
                     signal.entry_price = price  # 使用实时价格
                     await self._execute_trade(signal)
+        
+        # 价格超过上限，跳过
+        elif price > self.settings.max_entry_price:
+            self.logger.debug(f"⏭️ 价格 {price:.2%} 超过上限 {self.settings.max_entry_price:.0%}，跳过")
     
     async def _scan_sports_markets(self):
         """扫描体育市场尾盘"""
@@ -205,7 +217,8 @@ class EndgameStrategy:
             for market in markets:
                 best_outcome, best_price = market.best_outcome
                 
-                if best_price >= self.settings.entry_price:
+                # 检查价格是否在有效区间：entry_price ~ max_entry_price
+                if self.settings.entry_price <= best_price <= self.settings.max_entry_price:
                     self._sports_signals += 1
                     self.logger.info(
                         f"🏀 体育信号: {market.question[:50]}...\n"
@@ -217,6 +230,13 @@ class EndgameStrategy:
                     signal = self._create_signal_from_sports(market, best_outcome)
                     if signal:
                         await self._execute_trade(signal)
+                
+                # 价格超过上限
+                elif best_price > self.settings.max_entry_price:
+                    self.logger.debug(
+                        f"⏭️ 跳过体育 {market.question[:30]}... | "
+                        f"{best_outcome}: {best_price:.0%} | 价格超过上限"
+                    )
                         
         except Exception as e:
             self.logger.error(f"体育扫描错误: {e}")
