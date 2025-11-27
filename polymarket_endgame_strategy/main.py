@@ -119,7 +119,14 @@ def parse_args():
         "--log-file",
         type=str,
         default=None,
-        help="日志文件路径"
+        help="日志文件路径（单文件模式）"
+    )
+    
+    parser.add_argument(
+        "--log-dir",
+        type=str,
+        default=None,
+        help="日志目录（启用4小时轮转）"
     )
     
     return parser.parse_args()
@@ -164,7 +171,16 @@ async def main():
     
     # 设置日志
     log_level = logging.DEBUG if args.debug else logging.INFO
-    setup_logger(level=log_level, log_file=args.log_file)
+    
+    # 优先使用命令行参数，其次使用环境变量
+    log_dir = args.log_dir or os.environ.get("LOG_DIR")
+    log_file = args.log_file or os.environ.get("LOG_FILE")
+    
+    # 默认启用日志目录（如果都没设置）
+    if not log_dir and not log_file:
+        log_dir = "/app/logs" if os.path.exists("/app") else "./logs"
+    
+    setup_logger(level=log_level, log_file=log_file, log_dir=log_dir)
     logger = get_logger()
     
     # 创建配置

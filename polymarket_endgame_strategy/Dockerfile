@@ -2,7 +2,8 @@
 FROM python:3.11-slim
 
 ENV PYTHONUNBUFFERED=1 \
-    TZ=UTC
+    TZ=UTC \
+    LOG_DIR=/app/logs
 
 WORKDIR /app
 
@@ -21,6 +22,12 @@ RUN pip install --no-cache-dir -r requirements.txt
 RUN python3 -c "from py_clob_client.client import ClobClient; print('✅ py-clob-client OK')"
 
 COPY . .
+
+# 创建日志目录
+RUN mkdir -p /app/logs
+
+# 日志卷
+VOLUME ["/app/logs"]
 
 # 启动时验证配置
 ENTRYPOINT ["python3", "main.py"]

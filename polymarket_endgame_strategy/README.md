@@ -45,21 +45,26 @@ docker run -d --name poly-strategy \
   -e MAX_TIME_TO_END=15 \
   -e MAX_POSITION_SIZE=100 \
   -e MAX_TOTAL_EXPOSURE=500 \
+  -v $(pwd)/logs:/app/logs \
   --restart unless-stopped \
   polymarket-strategy
 ```
 
+> 💡 日志会自动按4小时分割保存到 `logs/` 目录
+
 ### 3. 常用命令
 
 ```bash
-# 查看日志
+# 查看实时日志
 docker logs -f poly-strategy
 
-# 停止
-docker stop poly-strategy
+# 查看日志文件
+ls -la logs/                           # 列出所有日志文件
+cat logs/strategy.log                  # 查看当前日志
+tail -f logs/strategy.log              # 实时跟踪当前日志
 
-# 删除
-docker rm poly-strategy
+# 停止并删除容器再重新运行
+docker stop poly-strategy 2>/dev/null; docker rm poly-strategy 2>/dev/null
 
 # 重启
 docker restart poly-strategy
@@ -91,6 +96,25 @@ python3 main.py --scan-once  # 只扫描一次
 | `--max-position` | `MAX_POSITION_SIZE` | 100 | 单笔最大仓位（USDC）|
 | `--max-exposure` | `MAX_TOTAL_EXPOSURE` | 500 | 最大总敞口（USDC）|
 | `--interval` | `SCAN_INTERVAL` | 10 | 扫描间隔（秒）|
+| `--log-dir` | `LOG_DIR` | `./logs` | 日志目录（4小时轮转）|
+
+## 日志文件
+
+日志会按 **4小时** 自动轮转，保留最近 7 天的记录：
+
+```
+logs/
+├── strategy.log                    # 当前日志
+├── strategy.log.20251125_040000.log  # 历史日志（按时间戳命名）
+├── strategy.log.20251125_080000.log
+└── ...
+```
+
+**日志格式：**
+```
+2025-11-25 12:34:56 | INFO     | 扫描 60 个 Updown 市场...
+2025-11-25 12:34:57 | INFO     | 找到 3 个符合条件的市场
+```
 
 ## 注意事项
 

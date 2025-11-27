@@ -1,11 +1,14 @@
 """
 日志模块
 提供结构化日志记录和彩色输出
+支持按时间轮转日志文件
 """
 
 import logging
 import sys
+import os
 from datetime import datetime
+from logging.handlers import TimedRotatingFileHandler
 from typing import Optional
 
 from rich.console import Console
@@ -31,7 +34,9 @@ _logger: Optional[logging.Logger] = None
 def setup_logger(
     name: str = "polymarket_endgame",
     level: int = logging.INFO,
-    log_file: Optional[str] = None
+    log_file: Optional[str] = None,
+    log_dir: Optional[str] = None,
+    rotate_hours: int = 4
 ) -> logging.Logger:
     """
     设置日志记录器
@@ -39,7 +44,9 @@ def setup_logger(
     Args:
         name: 日志名称
         level: 日志级别
-        log_file: 日志文件路径（可选）
+        log_file: 日志文件路径（可选，单文件模式）
+        log_dir: 日志目录（可选，启用时间轮转）
+        rotate_hours: 日志轮转间隔（小时），默认4小时
     
     Returns:
         配置好的日志记录器
@@ -65,8 +72,34 @@ def setup_logger(
     rich_handler.setFormatter(rich_format)
     logger.addHandler(rich_handler)
     
-    # 文件处理器（如果指定）
-    if log_file:
+    # 时间轮转文件处理器（按4小时分割）
+    if log_dir:
+        os.makedirs(log_dir, exist_ok=True)
+        log_path = os.path.join(log_dir, "strategy.log")
+        
+        # TimedRotatingFileHandler: 每4小时轮转一次
+        rotating_handler = TimedRotatingFileHandler(
+            log_path,
+            when="H",           # 按小时
+            interval=rotate_hours,  # 每4小时
+            backupCount=42,     # 保留7天的日志 (7*24/4=42)
+            encoding="utf-8"
+        )
+        rotating_handler.setLevel(level)
+        rotating_handler.suffix = "%Y%m%d_%H%M%S.log"  # 文件后缀格式
+        
+        file_format = logging.Formatter(
+            "%(asctime)s | %(levelname)-8s | %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S"
+        )
+        rotating_handler.setFormatter(file_format)
+        logger.addHandler(rotating_handler)
+        
+        logger.info(f"📁 日志文件: {log_path} (每{rotate_hours}小时轮转)")
+    
+    # 单文件处理器（如果指定）
+    elif log_file:
+        os.makedirs(os.path.dirname(log_file) or ".", exist_ok=True)
         file_handler = logging.FileHandler(log_file, encoding="utf-8")
         file_handler.setLevel(level)
         file_format = logging.Formatter(
